@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Arrow-Trade/go-arrow/arrow"
+	"github.com/arrow-trade/go-arrow/arrow"
 	"github.com/joho/godotenv"
 )
 

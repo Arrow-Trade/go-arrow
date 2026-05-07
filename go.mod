@@ -1,4 +1,4 @@
-module github.com/Arrow-Trade/go-arrow
+module github.com/arrow-trade/go-arrow
 
 go 1.24.5
 

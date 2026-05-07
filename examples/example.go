@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Abhi13027/go-arrow/arrow"
+	"github.com/Arrow-Trade/go-arrow/arrow"
 	"github.com/joho/godotenv"
 )
 
@@ -53,6 +53,7 @@ func main() {
 	}
 
 	fmt.Println("Login successful!")
+	fmt.Println(client.GetToken())
 
 	// Get user details
 	user, err := client.GetUserDetails()

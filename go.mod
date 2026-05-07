@@ -1,4 +1,4 @@
-module github.com/Abhi13027/go-arrow
+module github.com/Arrow-Trade/go-arrow
 
 go 1.24.5
 

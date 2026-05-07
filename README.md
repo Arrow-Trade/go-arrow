@@ -5,7 +5,7 @@ Official-style Go SDK for [Arrow Trade APIs](https://docs.arrow.trade/), includi
 ## Install
 
 ```bash
-go get github.com/Abhi13027/go-arrow
+go get github.com/Arrow-Trade/go-arrow
 ```
 
 ## Features
@@ -38,7 +38,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/Abhi13027/go-arrow/arrow"
+	"github.com/Arrow-Trade/go-arrow/arrow"
 )
 
 func main() {
@@ -108,7 +108,7 @@ to enable verbose request lifecycle logs.
 ## API Reference
 
 - Arrow API docs: [docs.arrow.trade](https://docs.arrow.trade/)
-- Go package docs: [pkg.go.dev/github.com/Abhi13027/go-arrow](https://pkg.go.dev/github.com/Abhi13027/go-arrow)
+- Go package docs: [pkg.go.dev/github.com/Arrow-Trade/go-arrow](https://pkg.go.dev/github.com/Arrow-Trade/go-arrow)
 
 ## License
 

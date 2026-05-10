@@ -37,7 +37,7 @@ func (c *Client) GetBasketMargin(req BasketMarginRequest) (*MarginResponse, erro
 type OptionChainRequest struct {
 	Underlying string   `json:"underlying"`
 	Exchange   Exchange `json:"exchange"`
-	Count      int      `json:"count"`
+	Count      string   `json:"count"`
 	Expiry     string   `json:"expiry"`
 }
 

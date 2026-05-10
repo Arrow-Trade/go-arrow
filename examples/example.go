@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -20,6 +22,9 @@ import (
 //   STREAM_DURATION — how long to listen on streams (default 15s), e.g. 30s, 1m
 //   STREAM_TOKENS — comma-separated instrument tokens for market data, default 26000,26009 (Nifty 50, Bank Nifty index tokens)
 //   TEST_QUOTE_EXCHANGE + TEST_QUOTE_SYMBOL — if both set, calls REST GetQuote (InfoQuoteLTP) after login
+//   TEST_OPTIONCHAIN_UNDERLYING, TEST_OPTIONCHAIN_EXCHANGE, TEST_OPTIONCHAIN_COUNT, TEST_OPTIONCHAIN_EXPIRY —
+//     if all four set, calls REST GetOptionChain; otherwise, if GetAllOptionChainSymbols returns INDEX:NIFTY expiries,
+//     uses underlying NIFTY, exchange NFO, count 5, and the first listed expiry as defaults.
 
 func main() {
 	godotenv.Load()
@@ -116,6 +121,48 @@ func main() {
 		return
 	}
 	fmt.Printf("Trades: %+v\n", trades)
+
+	ocSymbols, err := client.GetAllOptionChainSymbols()
+	if err != nil {
+		fmt.Println("GetAllOptionChainSymbols error:", err)
+	} else {
+		fmt.Printf("Option chain symbols: %+v\n", ocSymbols)
+	}
+
+	ocUnderlying := strings.TrimSpace(os.Getenv("TEST_OPTIONCHAIN_UNDERLYING"))
+	ocExchange := strings.TrimSpace(os.Getenv("TEST_OPTIONCHAIN_EXCHANGE"))
+	ocCount := strings.TrimSpace(os.Getenv("TEST_OPTIONCHAIN_COUNT"))
+	ocExpiry := strings.TrimSpace(os.Getenv("TEST_OPTIONCHAIN_EXPIRY"))
+	if ocUnderlying == "" || ocExchange == "" || ocCount == "" || ocExpiry == "" {
+		if exs, ok := ocSymbols["indices"]["INDEX:NIFTY"]; ok && len(exs) > 0 {
+			ocUnderlying = "NIFTY"
+			ocExchange = string(arrow.ExchangeNFO)
+			ocCount = "5"
+			ocExpiry = exs[0]
+			fmt.Printf("Option chain request defaults from symbols: underlying=%s exchange=%s count=%s expiry=%s\n",
+				ocUnderlying, ocExchange, ocCount, ocExpiry)
+		}
+	}
+	if ocUnderlying != "" && ocExchange != "" && ocCount != "" && ocExpiry != "" {
+		chain, ocErr := client.GetOptionChain(arrow.OptionChainRequest{
+			Underlying: ocUnderlying,
+			Exchange:   arrow.ExchangeINDEX,
+			Count:      ocCount,
+			Expiry:     ocExpiry,
+		})
+		if ocErr != nil {
+			fmt.Println("GetOptionChain error:", ocErr)
+		} else {
+			var buf bytes.Buffer
+			if indentErr := json.Indent(&buf, chain, "", "  "); indentErr != nil {
+				fmt.Printf("Option chain (raw): %s\n", string(chain))
+			} else {
+				fmt.Printf("Option chain:\n%s\n", buf.String())
+			}
+		}
+	} else {
+		fmt.Println("Skipping GetOptionChain (set all of TEST_OPTIONCHAIN_UNDERLYING, TEST_OPTIONCHAIN_EXCHANGE, TEST_OPTIONCHAIN_COUNT, TEST_OPTIONCHAIN_EXPIRY, or rely on INDEX:NIFTY in option-chain symbols).")
+	}
 
 	qEx := os.Getenv("TEST_QUOTE_EXCHANGE")
 	qSym := os.Getenv("TEST_QUOTE_SYMBOL")

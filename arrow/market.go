@@ -1,6 +1,7 @@
 package arrow
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -156,18 +157,13 @@ func (c *Client) GetCandleData(exchange Exchange, token, interval, fromTimestamp
 	q := url.Values{}
 	q.Set("from", fromTimestamp)
 	q.Set("to", toTimestamp)
-	q.Set("oi", fmt.Sprintf("%t", oi))
-	endpoint := fmt.Sprintf("%s/candle/%s/%s/%s?%s", base, exchange, token, interval, q.Encode())
-	resp, err := c.rawRequest(endpoint, "GET", nil)
+	if oi {
+		q.Set("oi", "1")
+	}
+	endpoint := fmt.Sprintf("%s/candle/%s/%s/%s?%s", base, strings.ToLower(string(exchange)), token, interval, q.Encode())
+	resp, err := c.rawRequestAuth(endpoint, "GET", nil)
 	if err != nil {
 		return nil, err
 	}
-	var result GenericResponse[json.RawMessage]
-	if err := json.Unmarshal(resp, &result); err != nil {
-		return nil, err
-	}
-	if result.Status != "success" {
-		return nil, fmt.Errorf("candle data retrieval failed with status: %s", result.Status)
-	}
-	return result.Data, nil
+	return json.RawMessage(bytes.TrimSpace(resp)), nil
 }

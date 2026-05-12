@@ -25,6 +25,8 @@ import (
 //   TEST_OPTIONCHAIN_UNDERLYING, TEST_OPTIONCHAIN_EXCHANGE, TEST_OPTIONCHAIN_COUNT, TEST_OPTIONCHAIN_EXPIRY —
 //     if all four set, calls REST GetOptionChain; otherwise, if GetAllOptionChainSymbols returns INDEX:NIFTY expiries,
 //     uses underlying NIFTY, exchange NFO, count 5, and the first listed expiry as defaults.
+//   TEST_CANDLE_EQ_TOKEN, TEST_CANDLE_FUT_TOKEN — instrument tokens for GetCandleData (defaults: 3045 NSE equity doc example, 41927 NFO doc example).
+//   TEST_CANDLE_INTERVAL — candle interval (default day); see https://docs.arrow.trade/rest-api/historical-candle-data/
 
 func main() {
 	godotenv.Load()
@@ -164,14 +166,52 @@ func main() {
 		fmt.Println("Skipping GetOptionChain (set all of TEST_OPTIONCHAIN_UNDERLYING, TEST_OPTIONCHAIN_EXCHANGE, TEST_OPTIONCHAIN_COUNT, TEST_OPTIONCHAIN_EXPIRY, or rely on INDEX:NIFTY in option-chain symbols).")
 	}
 
-	qEx := os.Getenv("TEST_QUOTE_EXCHANGE")
-	qSym := os.Getenv("TEST_QUOTE_SYMBOL")
-	if qEx != "" && qSym != "" {
-		quote, qerr := client.GetQuote(arrow.Exchange(qEx), qSym, arrow.InfoQuoteLTP)
-		if qerr != nil {
-			fmt.Println("GetQuote error:", qerr)
+	quote, qerr := client.GetQuote(arrow.ExchangeINDEX, "SENSEX", arrow.InfoQuoteLTP)
+	if qerr != nil {
+		fmt.Println("GetQuote error:", qerr)
+	} else {
+		fmt.Printf("REST quote (INDEX NIFTY): %+v\n", quote)
+	}
+
+	// Historical OHLCV: NSE equity (Eq) and NFO futures — tokens are instrument IDs (see instruments CSV / broker docs).
+	eqCandleTok := strings.TrimSpace(os.Getenv("TEST_CANDLE_EQ_TOKEN"))
+	if eqCandleTok == "" {
+		eqCandleTok = "3045" // SBIN example from Arrow historical candle docs
+	}
+	futCandleTok := strings.TrimSpace(os.Getenv("TEST_CANDLE_FUT_TOKEN"))
+	if futCandleTok == "" {
+		futCandleTok = "41927" // NFO example token from docs (rolls with contract; set TEST_CANDLE_FUT_TOKEN for a live future)
+	}
+	candleInterval := strings.TrimSpace(os.Getenv("TEST_CANDLE_INTERVAL"))
+	if candleInterval == "" {
+		candleInterval = "day"
+	}
+	toT := time.Now()
+	fromT := toT.Add(-14 * 24 * time.Hour)
+	fromTS := fromT.Format("2006-01-02T15:04:05")
+	toTS := toT.Format("2006-01-02T15:04:05")
+
+	candlesEQ, cerr := client.GetCandleData(arrow.ExchangeNSE, eqCandleTok, candleInterval, fromTS, toTS, false)
+	if cerr != nil {
+		fmt.Println("GetCandleData (NSE equity) error:", cerr)
+	} else {
+		var buf bytes.Buffer
+		if indentErr := json.Indent(&buf, candlesEQ, "", "  "); indentErr != nil {
+			fmt.Printf("Candles NSE EQ (raw): %s\n", string(candlesEQ))
 		} else {
-			fmt.Printf("REST quote (%s %s): %+v\n", qEx, qSym, quote)
+			fmt.Printf("Candles NSE EQ (token=%s interval=%s):\n%s\n", eqCandleTok, candleInterval, buf.String())
+		}
+	}
+
+	candlesFut, ferr := client.GetCandleData(arrow.ExchangeNFO, futCandleTok, candleInterval, fromTS, toTS, true)
+	if ferr != nil {
+		fmt.Println("GetCandleData (NFO futures, oi=1) error:", ferr)
+	} else {
+		var buf bytes.Buffer
+		if indentErr := json.Indent(&buf, candlesFut, "", "  "); indentErr != nil {
+			fmt.Printf("Candles NFO (raw): %s\n", string(candlesFut))
+		} else {
+			fmt.Printf("Candles NFO futures (token=%s interval=%s, open interest):\n%s\n", futCandleTok, candleInterval, buf.String())
 		}
 	}
 

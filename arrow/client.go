@@ -136,6 +136,38 @@ func (c *Client) rawRequest(url string, method string, payload []byte) ([]byte, 
 	return resp.Body(), nil
 }
 
+// rawRequestAuth is like rawRequest but sets appId and token headers (required by historical-api.arrow.trade).
+func (c *Client) rawRequestAuth(fullURL string, method string, payload []byte) ([]byte, error) {
+	c.debugf("Making raw request (auth)", func(e *zerolog.Event) {
+		e.Str("url", fullURL).Str("method", method)
+	})
+
+	req := fasthttp.AcquireRequest()
+	defer fasthttp.ReleaseRequest(req)
+	req.SetRequestURI(fullURL)
+	req.Header.Set("appId", c.Config.AppID)
+	req.Header.Set("token", c.Config.Token)
+	req.Header.SetMethod(method)
+	if len(payload) > 0 {
+		req.Header.SetContentType("application/json")
+		req.SetBody(payload)
+	}
+
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(resp)
+
+	err := c.HTTPClient.Do(req, resp)
+	if err != nil {
+		log.Error().Err(err).Msg("API request failed")
+		return nil, err
+	}
+	if resp.StatusCode() >= fasthttp.StatusBadRequest {
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode(), string(resp.Body()))
+	}
+
+	return resp.Body(), nil
+}
+
 // SetToken updates the authentication token dynamically.
 //
 // This function allows updating the API token at runtime without needing to recreate the client.

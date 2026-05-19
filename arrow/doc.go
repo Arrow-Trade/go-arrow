@@ -5,7 +5,7 @@
 //   - order/trade endpoints (place, modify, cancel, books)
 //   - user/portfolio endpoints (profile, holdings, positions, limits)
 //   - market endpoints (quotes, option chain, instruments, candles)
-//   - WebSocket streams (order updates and token market data)
+//   - WebSocket streams (order updates; token market data on ds.arrow.trade; HFT market data on socket.arrow.trade — use NewStreams / NewStreamsWithHFT / NewStreamsOrderOnly as needed)
 //
 // Basic usage:
 //

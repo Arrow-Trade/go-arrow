@@ -6,9 +6,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"log"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/arrow-trade/go-arrow/arrow"
@@ -19,20 +23,24 @@ import (
 //   USER_ID, PASSWORD, TOTP_KEY, APP_ID, APP_SECRET — required for AutoLogin
 //   SDK_DEBUG=1 — enable verbose SDK logs
 //   SKIP_STREAMS=1 — only run REST calls (no WebSockets)
-//   STREAM_DURATION — how long to listen on streams (default 15s), e.g. 30s, 1m
-//   STREAM_TOKENS — comma-separated instrument tokens for market data, default 26000,26009 (Nifty 50, Bank Nifty index tokens)
+//   SKIP_HFT=1 — order-updates WebSocket only (no HFT socket)
+//   HFT_SYMBOLS — comma-separated HFT symbol names for SubscribeHFTSymbols (default NSE.SBIN-EQ). See https://docs.arrow.trade/python-sdk/websocket-streaming/
+//   HFT_LATENCY_MS — tick throttle for HFT subscribe (default 50; range 50–60000 per docs)
+//   HFT_LOG_FILE — append stream + HFT lines here as well as stdout (default hft-stream.log)
+//   STREAM_DURATION — optional cap, e.g. 30s, 1m; if unset and -stream-sec=0, streams run until SIGINT/SIGTERM
 //   TEST_QUOTE_EXCHANGE + TEST_QUOTE_SYMBOL — if both set, calls REST GetQuote (InfoQuoteLTP) after login
 //   TEST_OPTIONCHAIN_UNDERLYING, TEST_OPTIONCHAIN_EXCHANGE, TEST_OPTIONCHAIN_COUNT, TEST_OPTIONCHAIN_EXPIRY —
 //     if all four set, calls REST GetOptionChain; otherwise, if GetAllOptionChainSymbols returns INDEX:NIFTY expiries,
 //     uses underlying NIFTY, exchange NFO, count 5, and the first listed expiry as defaults.
 //   TEST_CANDLE_EQ_TOKEN, TEST_CANDLE_FUT_TOKEN — instrument tokens for GetCandleData (defaults: 3045 NSE equity doc example, 41927 NFO doc example).
 //   TEST_CANDLE_INTERVAL — candle interval (default day); see https://docs.arrow.trade/rest-api/historical-candle-data/
+//   PLACE_ORDER=1 — call REST PlaceOrder (off by default). Optional TEST_ORDER_* override exchange, symbol, qty, product, txn, type, price, validity, disclosed qty, remarks, variety (default regular), mpp.
 
 func main() {
 	godotenv.Load()
 
 	noStreams := flag.Bool("no-streams", false, "skip order + market WebSocket test")
-	streamSec := flag.Int("stream-sec", 0, "seconds to run streams (0 = use STREAM_DURATION env or 15)")
+	streamSec := flag.Int("stream-sec", 0, "optional seconds cap on streams (0 = until SIGINT, or use STREAM_DURATION)")
 	flag.Parse()
 
 	userID := os.Getenv("USER_ID")
@@ -123,6 +131,17 @@ func main() {
 		return
 	}
 	fmt.Printf("Trades: %+v\n", trades)
+
+	if os.Getenv("PLACE_ORDER") == "1" || strings.EqualFold(os.Getenv("PLACE_ORDER"), "true") {
+		resp, perr := placeOrder(client)
+		if perr != nil {
+			fmt.Println("PlaceOrder error:", perr)
+		} else {
+			fmt.Printf("PlaceOrder: orderNo=%s requestTime=%s\n", resp.Data.OrderNo, resp.Data.RequestTime)
+		}
+	} else {
+		fmt.Println("Skipping PlaceOrder (set PLACE_ORDER=1 to place a test order; optional TEST_ORDER_* env vars).")
+	}
 
 	ocSymbols, err := client.GetAllOptionChainSymbols()
 	if err != nil {
@@ -221,7 +240,7 @@ func main() {
 		return
 	}
 
-	dur := 15 * time.Second
+	var dur time.Duration
 	if *streamSec > 0 {
 		dur = time.Duration(*streamSec) * time.Second
 	} else if d := strings.TrimSpace(os.Getenv("STREAM_DURATION")); d != "" {
@@ -230,62 +249,181 @@ func main() {
 		}
 	}
 
-	tokens := parseStreamTokens(os.Getenv("STREAM_TOKENS"), []int32{26000, 26009})
-	fmt.Printf("Connecting streams for %s (tokens %v)...\n", dur, tokens)
+	logPath := strings.TrimSpace(os.Getenv("HFT_LOG_FILE"))
+	if logPath == "" {
+		logPath = "hft-stream.log"
+	}
+	logFile, lerr := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if lerr != nil {
+		fmt.Println("open log file:", lerr)
+		return
+	}
+	defer logFile.Close()
+	streamLog := log.New(io.MultiWriter(os.Stdout, logFile), "", log.LstdFlags|log.Lmicroseconds)
 
-	streams, err := client.NewStreams()
+	skipHFT := os.Getenv("SKIP_HFT") == "1" || strings.EqualFold(os.Getenv("SKIP_HFT"), "true")
+	if dur > 0 {
+		streamLog.Printf("connecting order (+ HFT unless SKIP_HFT); max duration %v; also logging to %s", dur, logPath)
+	} else {
+		streamLog.Printf("connecting order (+ HFT unless SKIP_HFT); run until SIGINT/SIGTERM (no duration cap); also logging to %s", logPath)
+	}
+
+	var streams *arrow.ArrowStreams
+	if skipHFT {
+		streams, err = client.NewStreamsOrderOnly()
+	} else {
+		streams, err = client.NewStreamsWithHFT()
+		if err != nil {
+			streamLog.Printf("HFT socket unavailable, order stream only: %v", err)
+			streams, err = client.NewStreamsOrderOnly()
+		}
+	}
 	if err != nil {
-		fmt.Println("Error:", err)
+		streamLog.Printf("streams connect error: %v", err)
 		return
 	}
 	defer streams.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), dur)
-	defer cancel()
+	sigCtx, stopSig := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSig()
+
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if dur > 0 {
+		ctx, cancel = context.WithTimeout(sigCtx, dur)
+		defer cancel()
+	} else {
+		ctx = sigCtx
+		cancel = func() {}
+	}
 
 	go streams.OrderStream.ReadUpdates(ctx, func(update map[string]any) {
-		fmt.Printf("Order update: %+v\n", update)
+		streamLog.Printf("order update: %+v", update)
 	}, func(err error) {
-		fmt.Println("order stream error:", err)
+		streamLog.Printf("ORDER stream read ended (disconnect or error): %v", err)
 	})
 
-	err = streams.DataStream.Subscribe(arrow.StreamModeLTPC, tokens)
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
+	if streams.HFTDataStream != nil {
+		hftSyms := parseHFTSymbols(os.Getenv("HFT_SYMBOLS"), []string{"NSE.SBIN-EQ"})
+		hftLatency := 50
+		if ls := strings.TrimSpace(os.Getenv("HFT_LATENCY_MS")); ls != "" {
+			if n, e := strconv.Atoi(ls); e == nil && n > 0 {
+				hftLatency = n
+			}
+		}
+		if err := streams.HFTDataStream.SubscribeHFTSymbols("ltpc", hftSyms, hftLatency); err != nil {
+			streamLog.Printf("HFT subscribe error: %v", err)
+		} else {
+			streamLog.Printf("HFT subscribed ltpc symbols=%v latency_ms=%d (prices on wire are in paise)", hftSyms, hftLatency)
+			go streams.HFTDataStream.ReadHFT(ctx,
+				func(t arrow.HFTLTPTick) {
+					streamLog.Printf("HFT LTP: token=%d ltp_paise=%d vol=%d exch_seg=%d", t.Token, t.LTP, t.Volume, t.ExchSeg)
+				},
+				func(t arrow.HFTFullTick) {
+					streamLog.Printf("HFT full: token=%d ltp_paise=%d bid0_paise=%d ask0_paise=%d", t.Token, t.LTP, t.BidPx[0], t.AskPx[0])
+				},
+				func(r arrow.HFTResponsePacket) {
+					streamLog.Printf("HFT response: code=%q msg=%q req=%s mode=%s ok=%d err=%d",
+						r.ErrorCode, r.ErrorMsg, r.RequestTypeStr, r.ModeStr, r.SuccessCount, r.ErrorCount)
+				},
+				func(err error) {
+					streamLog.Printf("HFT stream read ended (disconnect or error): %v", err)
+				},
+			)
+		}
 	}
-	streams.DataStream.ReadTicks(ctx, func(tick arrow.MarketTick) {
-		fmt.Printf("Tick: token=%d ltp=%d change=%.2f%% mode=%s\n", tick.Token, tick.LTP, tick.NetChange, tick.Mode)
-	}, func(err error) {
-		fmt.Println("data stream error:", err)
-	})
 
-	fmt.Println("Stream window finished.")
+	<-ctx.Done()
+	if ctx.Err() == context.DeadlineExceeded {
+		streamLog.Printf("stream run stopped: duration limit reached (%v)", dur)
+	} else {
+		streamLog.Printf("stream run stopped: %v", ctx.Err())
+	}
 }
 
-func parseStreamTokens(raw string, defaults []int32) []int32 {
+// placeOrder submits a regular variety order using TEST_ORDER_* env vars (see file header).
+func placeOrder(client *arrow.Client) (*arrow.OrderResponse, error) {
+	exchange := strings.TrimSpace(os.Getenv("TEST_ORDER_EXCHANGE"))
+	if exchange == "" {
+		exchange = string(arrow.ExchangeNSE)
+	}
+	symbol := strings.TrimSpace(os.Getenv("TEST_ORDER_SYMBOL"))
+	if symbol == "" {
+		symbol = "YESBANK-EQ"
+	}
+	quantity := strings.TrimSpace(os.Getenv("TEST_ORDER_QUANTITY"))
+	if quantity == "" {
+		quantity = "1"
+	}
+	product := strings.TrimSpace(os.Getenv("TEST_ORDER_PRODUCT"))
+	if product == "" {
+		product = string(arrow.ProductCNC)
+	}
+	txn := strings.TrimSpace(os.Getenv("TEST_ORDER_TRANSACTION"))
+	if txn == "" {
+		txn = string(arrow.TransactionTypeBuy)
+	}
+	orderKind := strings.TrimSpace(os.Getenv("TEST_ORDER_TYPE"))
+	if orderKind == "" {
+		orderKind = string(arrow.OrderTypeLimit)
+	}
+	price := strings.TrimSpace(os.Getenv("TEST_ORDER_PRICE"))
+	if price == "" {
+		price = "1" // far from market; override TEST_ORDER_PRICE for a real limit
+	}
+	validity := strings.TrimSpace(os.Getenv("TEST_ORDER_VALIDITY"))
+	if validity == "" {
+		validity = string(arrow.ValidityDAY)
+	}
+	variety := strings.TrimSpace(os.Getenv("TEST_ORDER_VARIETY"))
+	if variety == "" {
+		variety = "regular"
+	}
+
+	order := arrow.OrderRequest{
+		Exchange:         exchange,
+		Symbol:           symbol,
+		Quantity:         quantity,
+		Product:          product,
+		TransactionType:  txn,
+		OrderType:        orderKind,
+		Price:            price,
+		Validity:         validity,
+		MarketProtection: os.Getenv("TEST_ORDER_MPP") == "1" || strings.EqualFold(os.Getenv("TEST_ORDER_MPP"), "true"),
+	}
+
+	fmt.Printf("PlaceOrder request: %+v\n", order)
+	if dq := strings.TrimSpace(os.Getenv("TEST_ORDER_DISCLOSED_QTY")); dq != "" {
+		order.DisclosedQty = dq
+	}
+	if remarks := strings.TrimSpace(os.Getenv("TEST_ORDER_REMARKS")); remarks != "" {
+		order.Remarks = remarks
+	}
+
+	fmt.Printf("PlaceOrder request: variety=%s exchange=%s symbol=%s qty=%s product=%s txn=%s type=%s price=%s validity=%s mpp=%v\n",
+		variety, order.Exchange, order.Symbol, order.Quantity, order.Product,
+		order.TransactionType, order.OrderType, order.Price, order.Validity, order.MarketProtection)
+
+	return client.PlaceOrder(variety, order)
+}
+
+func parseHFTSymbols(raw string, defaults []string) []string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		out := make([]int32, len(defaults))
+		out := make([]string, len(defaults))
 		copy(out, defaults)
 		return out
 	}
 	parts := strings.Split(raw, ",")
-	var out []int32
+	var out []string
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
+		if p != "" {
+			out = append(out, p)
 		}
-		n, err := strconv.ParseInt(p, 10, 32)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "skip bad STREAM_TOKENS part %q: %v\n", p, err)
-			continue
-		}
-		out = append(out, int32(n))
 	}
 	if len(out) == 0 {
-		out = make([]int32, len(defaults))
+		out = make([]string, len(defaults))
 		copy(out, defaults)
 	}
 	return out

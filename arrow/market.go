@@ -152,6 +152,12 @@ func (c *Client) GetInstruments(segment InstrumentSegment) ([][]string, error) {
 	return r.ReadAll()
 }
 
+// GetCandleData calls the Historical Data API (GET /candle/:exchange/:token/:interval).
+// Query parameters from and to must be in yyyy-MM-ddTHH:mm:ss form; oi adds oi=1 (NFO only, extra OHLC field in each row).
+// On success the body is a JSON array of candle rows (arrays), as in the docs — not the usual REST {data,status} envelope.
+// On failure the HTTP API may return 4xx JSON such as {"status":"error","errorMessage":"invalid token","errorCode":"BadRequestError"}:
+// that means the exchange/token pair is not recognised (wrong segment or expired derivatives token), not a client-side parse error.
+// See https://docs.arrow.trade/rest-api/historical-candle-data/
 func (c *Client) GetCandleData(exchange Exchange, token, interval, fromTimestamp, toTimestamp string, oi bool) (json.RawMessage, error) {
 	base := "https://historical-api.arrow.trade"
 	q := url.Values{}

@@ -19,6 +19,7 @@ const (
 )
 
 // StreamMode is the subscription mode for the token-based market WebSocket (wss://ds.arrow.trade).
+// Inbound ticks are binary, big-endian int fields, with lengths 13 / 17 / 93 / 241 by mode (aligned with Arrow’s JS/Python clients).
 // REST /info/quote uses a smaller set; see InfoQuoteMode in quote.go.
 type StreamMode string
 
@@ -273,9 +274,23 @@ func trimNulls(b []byte) []byte {
 }
 
 type ArrowStreams struct {
-	Client      *Client
-	OrderStream *OrderStream
-	DataStream  *DataStream
+	Client        *Client
+	OrderStream   *OrderStream
+	DataStream    *DataStream
+	HFTDataStream *HFTDataStream // set by NewStreamsWithHFT when used; optional (see hft_stream.go)
+}
+
+// NewStreamsOrderOnly connects only the order-updates WebSocket (wss://order-updates.arrow.trade).
+func (c *Client) NewStreamsOrderOnly() (*ArrowStreams, error) {
+	orderStream, err := c.ConnectOrderStream()
+	if err != nil {
+		return nil, err
+	}
+	return &ArrowStreams{
+		Client:      c,
+		OrderStream: orderStream,
+		DataStream:  nil,
+	}, nil
 }
 
 func (c *Client) NewStreams() (*ArrowStreams, error) {
@@ -295,6 +310,26 @@ func (c *Client) NewStreams() (*ArrowStreams, error) {
 	}, nil
 }
 
+// NewStreamsWithHFT connects order updates (wss://order-updates.arrow.trade) and the HFT market socket (wss://socket.arrow.trade).
+// It does not open the standard token data stream (wss://ds.arrow.trade); use NewStreams for order + standard market data.
+func (c *Client) NewStreamsWithHFT() (*ArrowStreams, error) {
+	orderStream, err := c.ConnectOrderStream()
+	if err != nil {
+		return nil, err
+	}
+	hft, err := c.ConnectHFTDataStream()
+	if err != nil {
+		_ = orderStream.Close()
+		return nil, err
+	}
+	return &ArrowStreams{
+		Client:        c,
+		OrderStream:   orderStream,
+		DataStream:    nil,
+		HFTDataStream: hft,
+	}, nil
+}
+
 func (s *ArrowStreams) Close() error {
 	var closeErr error
 	if s.OrderStream != nil {
@@ -304,6 +339,11 @@ func (s *ArrowStreams) Close() error {
 	}
 	if s.DataStream != nil {
 		if err := s.DataStream.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if s.HFTDataStream != nil {
+		if err := s.HFTDataStream.Close(); err != nil && closeErr == nil {
 			closeErr = err
 		}
 	}

@@ -75,7 +75,6 @@ type OrderDetails struct {
 	ExchangeUpdateTime string `json:"exchangeUpdateTime"` // Last update timestamp from the exchange.
 	ExchangeTime       string `json:"exchangeTime"`       // Timestamp from the exchange system.
 	OrderSource        string `json:"orderSource"`        // Source from which the order was placed (e.g., WEB, MOBILE, API).
-	IsAck              bool   `json:"isAck"`              // Acknowledgment flag indicating if order is acknowledged by exchange.
 	LeavesQuantity     string `json:"leavesQuantity"`     // Remaining quantity yet to be executed.
 }
 
@@ -145,7 +144,7 @@ type Trade struct {
 // It sends a POST request to the API endpoint "/order/{orderType}" with the order details.
 //
 // Parameters:
-//   - orderType: Type of order (e.g., MARKET, LIMIT).
+//   - orderType: Type of order (e.g., regular for now).
 //   - order: OrderRequest struct containing the order details.
 //
 // Returns:

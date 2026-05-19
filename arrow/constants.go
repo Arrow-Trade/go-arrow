@@ -22,7 +22,7 @@ type Product string
 
 const (
 	ProductCNC  Product = "C" // Cash and Carry (delivery)
-	ProductMIS  Product = "M" // Intraday
+	ProductMIS  Product = "I" // Intraday
 	ProductNRML Product = "M" // Normal (F&O)
 )
 

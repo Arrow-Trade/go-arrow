@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/klauspost/compress/zstd"
 )
 
 const hftStreamURL = "wss://socket.arrow.trade"
@@ -39,6 +40,8 @@ const (
 type HFTDataStream struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
+	zstd bool
+	zdec *zstd.Decoder
 }
 
 func (c *Client) ConnectHFTDataStream() (*HFTDataStream, error) {
@@ -51,14 +54,102 @@ func (c *Client) ConnectHFTDataStream() (*HFTDataStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &HFTDataStream{conn: conn}, nil
+	dec, err := zstd.NewReader(nil)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("hft zstd decoder: %w", err)
+	}
+	return &HFTDataStream{conn: conn, zstd: true, zdec: dec}, nil
 }
 
 func (s *HFTDataStream) Close() error {
 	if s == nil || s.conn == nil {
 		return nil
 	}
+	if s.zdec != nil {
+		s.zdec.Close()
+		s.zdec = nil
+	}
 	return s.conn.Close()
+}
+
+func (s *HFTDataStream) decodeHFTPayload(payload []byte) ([]byte, error) {
+	if s == nil || !s.zstd || s.zdec == nil {
+		return payload, nil
+	}
+	return s.zdec.DecodeAll(payload, nil)
+}
+
+// hftPacketMeta inspects the next frame in payload. Response frames use a 4-byte
+// uint32 size (540) with pkt_type at offset 4; LTP/full ticks use int16 size with
+// pkt_type at offset 2.
+func hftPacketMeta(payload []byte) (size int, pktType uint8, ok bool) {
+	if len(payload) >= hftSizeResponse &&
+		binary.LittleEndian.Uint32(payload[0:4]) == uint32(hftSizeResponse) &&
+		payload[4] == hftPktResponse {
+		return hftSizeResponse, hftPktResponse, true
+	}
+	if len(payload) >= hftSizeLTP {
+		size = int(int16(binary.LittleEndian.Uint16(payload[0:2])))
+		if size == hftSizeLTP && payload[2] == hftPktLTP {
+			return hftSizeLTP, hftPktLTP, true
+		}
+	}
+	if len(payload) >= hftSizeFull {
+		size = int(int16(binary.LittleEndian.Uint16(payload[0:2])))
+		if size == hftSizeFull && payload[2] == hftPktFull {
+			return hftSizeFull, hftPktFull, true
+		}
+	}
+	return 0, 0, false
+}
+
+func (s *HFTDataStream) dispatchHFTPayload(payload []byte, onLTP func(HFTLTPTick), onFull func(HFTFullTick), onResponse func(HFTResponsePacket), onError func(error)) {
+	for len(payload) > 0 {
+		n, pkt, ok := hftPacketMeta(payload)
+		if !ok {
+			if onError != nil {
+				onError(fmt.Errorf("hft unknown packet: %d trailing bytes", len(payload)))
+			}
+			return
+		}
+		if len(payload) < n {
+			if onError != nil {
+				onError(fmt.Errorf("hft incomplete frame: want %d bytes, got %d", n, len(payload)))
+			}
+			return
+		}
+		frame := payload[:n]
+		payload = payload[n:]
+		switch pkt {
+		case hftPktResponse:
+			if onResponse != nil {
+				onResponse(parseHFTResponse(frame))
+			}
+		case hftPktLTP:
+			if onLTP != nil {
+				t, perr := parseHFTLTP(frame)
+				if perr != nil {
+					if onError != nil {
+						onError(perr)
+					}
+					continue
+				}
+				onLTP(t)
+			}
+		case hftPktFull:
+			if onFull != nil {
+				t, perr := parseHFTFull(frame)
+				if perr != nil {
+					if onError != nil {
+						onError(perr)
+					}
+					continue
+				}
+				onFull(t)
+			}
+		}
+	}
 }
 
 func normalizeHFTMode(mode string) (string, error) {
@@ -197,51 +288,14 @@ func (s *HFTDataStream) ReadHFT(ctx context.Context, onLTP func(HFTLTPTick), onF
 		if mt != websocket.BinaryMessage {
 			continue
 		}
-		if len(payload) < 3 {
-			continue
-		}
-		frameSize := int(int16(binary.LittleEndian.Uint16(payload[0:2])))
-		if frameSize > 0 && len(payload) < frameSize {
+		payload, err = s.decodeHFTPayload(payload)
+		if err != nil {
 			if onError != nil {
-				onError(fmt.Errorf("hft incomplete frame: want %d bytes, got %d", frameSize, len(payload)))
+				onError(fmt.Errorf("hft zstd decompress: %w", err))
 			}
 			continue
 		}
-		pkt := payload[2]
-		switch pkt {
-		case hftPktResponse:
-			if len(payload) >= hftSizeResponse {
-				if onResponse != nil {
-					onResponse(parseHFTResponse(payload))
-				}
-			}
-		case hftPktLTP:
-			if len(payload) >= hftSizeLTP {
-				if onLTP != nil {
-					t, perr := parseHFTLTP(payload)
-					if perr != nil {
-						if onError != nil {
-							onError(perr)
-						}
-						continue
-					}
-					onLTP(t)
-				}
-			}
-		case hftPktFull:
-			if len(payload) >= hftSizeFull {
-				if onFull != nil {
-					t, perr := parseHFTFull(payload)
-					if perr != nil {
-						if onError != nil {
-							onError(perr)
-						}
-						continue
-					}
-					onFull(t)
-				}
-			}
-		}
+		s.dispatchHFTPayload(payload, onLTP, onFull, onResponse, onError)
 	}
 }
 
@@ -382,8 +436,8 @@ func parseHFTResponse(data []byte) HFTResponsePacket {
 	// Packet type for routing is wire byte 2 (see ReadHFT); bytes 4–5 are unused on the wire we model here.
 	r := HFTResponsePacket{
 		FrameSize:    int16(binary.LittleEndian.Uint16(data[0:2])),
-		PktType:      data[2],
-		ExchSeg:      data[3],
+		PktType:      data[4],
+		ExchSeg:      data[5],
 		ErrorCode:    strings.TrimRight(string(data[6:22]), "\x00"),
 		ErrorMsg:     strings.TrimRight(string(data[22:534]), "\x00"),
 		RequestType:  data[534],

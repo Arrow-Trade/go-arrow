@@ -6,3 +6,7 @@ test:
 
 debug:
 	SDK_DEBUG=1 make test
+
+
+hft:
+	HFT_MODE=full go run ./examples/hft.go

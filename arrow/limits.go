@@ -7,35 +7,17 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Limits represents the trading limits and margin details for a user.
+// Limits is the /user/limits payload: segment allocations plus account margin summary.
+// Field values are strings in live API responses (e.g. "usableMargin", "netPnl").
 type Limits struct {
 	Data struct {
-		Utilized           float64 `json:"utilized"`
-		Allocated          float64 `json:"allocated"`
-		NonCashOpen        int     `json:"nonCashOpen"`
-		CashOpen           float64 `json:"cashOpen"`
-		NonCashCurrent     int     `json:"nonCashCurrent"`
-		CashCurrent        float64 `json:"cashCurrent"`
-		CashUsed           int     `json:"cashUsed"`
-		SpanMargin         int     `json:"spanMargin"`
-		ExposureMargin     int     `json:"exposureMargin"`
-		OtherMargin        int     `json:"otherMargin"`
-		IntradayCashMargin float64 `json:"intradayCashMargin"`
-		TotalMargin        float64 `json:"totalMargin"`
-		RealizedPnl        int     `json:"realizedPnl"`
-		UnrealizedPnl      int     `json:"unrealizedPnl"`
+		Allocations []map[string]any `json:"allocations"`
+		Margin      map[string]any     `json:"margin"`
 	} `json:"data"`
 	Status string `json:"status"`
 }
 
-// GetLimits fetches the trading limits and margin details for the authenticated user.
-//
-// This function sends a GET request to the "/user/limits" endpoint to retrieve available margins,
-// blocked funds, collateral, pending orders, and other financial details.
-//
-// Returns:
-//   - A pointer to a Limits struct containing the trading limits if successful.
-//   - An error if the request fails or the response cannot be parsed.
+// GetLimits fetches trading limits and margin for the authenticated user.
 func (c *Client) GetLimits() (*Limits, error) {
 	endpoint := "/user/limits"
 

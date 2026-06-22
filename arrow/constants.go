@@ -38,10 +38,12 @@ const (
 type OrderType string
 
 const (
-	OrderTypeLimit  OrderType = "LMT"  // Limit order
-	OrderTypeMarket OrderType = "MKT"  // Market order
-	OrderTypeSL     OrderType = "SL"   // Stop Loss
-	OrderTypeSLM    OrderType = "SL-M" // Stop Loss Market
+	OrderTypeLimit   OrderType = "LMT"    // Limit order
+	OrderTypeMarket  OrderType = "MKT"    // Market order
+	OrderTypeSL      OrderType = "SL"     // Stop Loss (legacy)
+	OrderTypeSLM     OrderType = "SL-M"   // Stop Loss Market (legacy)
+	OrderTypeSLLMT   OrderType = "SL-LMT" // Stop Loss Limit (REST docs)
+	OrderTypeSLMKT   OrderType = "SL-MKT" // Stop Loss Market (REST docs)
 )
 
 // Validity represents order validity period.

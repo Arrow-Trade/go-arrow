@@ -19,7 +19,7 @@ type BasketMarginRequest struct {
 	IncludePositions bool            `json:"includePositions"`
 }
 
-func (c *Client) GetBasketMargin(req BasketMarginRequest) (*MarginResponse, error) {
+func (c *Client) GetBasketMargin(req BasketMarginRequest) (map[string]any, error) {
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -28,11 +28,38 @@ func (c *Client) GetBasketMargin(req BasketMarginRequest) (*MarginResponse, erro
 	if err != nil {
 		return nil, err
 	}
-	var result MarginResponse
+	var result GenericResponse[map[string]any]
 	if err := json.Unmarshal(resp, &result); err != nil {
 		return nil, err
 	}
-	return &result, nil
+	if result.Status != "success" {
+		return nil, fmt.Errorf("basket margin failed with status: %s", result.Status)
+	}
+	if result.Data == nil {
+		return map[string]any{}, nil
+	}
+	return result.Data, nil
+}
+
+// GetGreeks posts an array of instrument tokens to /info/greeks.
+// The server may return 400 when Greeks are unavailable for the given tokens.
+func (c *Client) GetGreeks(tokens []int) (json.RawMessage, error) {
+	payload, err := json.Marshal(tokens)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.request("/info/greeks", "POST", payload)
+	if err != nil {
+		return nil, err
+	}
+	var result GenericResponse[json.RawMessage]
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, err
+	}
+	if result.Status != "success" {
+		return nil, fmt.Errorf("greeks retrieval failed with status: %s", result.Status)
+	}
+	return result.Data, nil
 }
 
 type OptionChainRequest struct {
@@ -85,25 +112,25 @@ func (c *Client) GetAllOptionChainSymbols() (OptionChainSymbolsByCategory, error
 	return result.Data, nil
 }
 
-type Holiday struct {
-	Date     string `json:"date"`
-	Exchange string `json:"exchange"`
-	Name     string `json:"name"`
+// HolidaysData is the object under "data" for GET /info/holidays.
+type HolidaysData struct {
+	Holidays           map[string]string    `json:"holidays"`
+	SpecialTradingDays map[string]json.RawMessage `json:"specialTradingDays"`
 }
 
-func (c *Client) GetHolidays() ([]Holiday, error) {
+func (c *Client) GetHolidays() (*HolidaysData, error) {
 	resp, err := c.request("/info/holidays", "GET", nil)
 	if err != nil {
 		return nil, err
 	}
-	var result GenericResponse[[]Holiday]
+	var result GenericResponse[HolidaysData]
 	if err := json.Unmarshal(resp, &result); err != nil {
 		return nil, err
 	}
 	if result.Status != "success" {
 		return nil, fmt.Errorf("holiday retrieval failed with status: %s", result.Status)
 	}
-	return result.Data, nil
+	return &result.Data, nil
 }
 
 func (c *Client) GetIndexList() ([]map[string]any, error) {

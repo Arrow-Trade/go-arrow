@@ -22,6 +22,7 @@ type OrderRequest struct {
 	Validity         string `json:"validity"`               // Order validity (e.g., DAY, IOC).
 	Remarks          string `json:"remarks,omitempty"`      // Custom Remarks for order tracking (optional).
 	MarketProtection bool   `json:"mpp"`                    // Market protection flag; defaults to false when not set.
+	TriggerPrice     string `json:"triggerPrice,omitempty"` // Trigger price for SL orders.
 }
 
 // OrderResponse represents the API response after placing an order.
@@ -187,10 +188,10 @@ func (c *Client) PlaceOrder(orderType string, order OrderRequest) (*OrderRespons
 
 // ModifyOrder modifies an existing order.
 //
-// It sends a PATCH request to the API endpoint "/order/{orderType}/{orderID}" with the modified order details.
+// It sends a PATCH request to the API endpoint "/order/{variety}/{orderID}" with the modified order details.
 //
 // Parameters:
-//   - orderType: Type of the order being modified (e.g., MARKET, LIMIT).
+//   - variety: Order variety (e.g. "regular"), same as PlaceOrder — not LMT/MKT.
 //   - orderID: Unique identifier of the order to be modified.
 //   - order: OrderRequest struct containing updated order details.
 //
@@ -230,10 +231,10 @@ func (c *Client) ModifyOrder(orderType, orderID string, order OrderRequest) (*Or
 
 // CancelOrder cancels an existing order.
 //
-// It sends a DELETE request to the API endpoint "/order/{orderType}/{orderID}".
+// It sends a DELETE request to the API endpoint "/order/{variety}/{orderID}".
 //
 // Parameters:
-//   - orderType: Type of the order to be canceled (e.g., MARKET, LIMIT).
+//   - variety: Order variety (e.g. "regular"), same as PlaceOrder — not LMT/MKT.
 //   - orderID: Unique identifier of the order.
 //
 // Returns:

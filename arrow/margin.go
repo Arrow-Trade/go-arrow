@@ -2,6 +2,7 @@ package arrow
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/rs/zerolog/log"
 )
@@ -64,6 +65,9 @@ func (c *Client) GetMargin(order MarginRequest) (*MarginResponse, error) {
 	if err := json.Unmarshal(resp, &result); err != nil {
 		log.Error().Err(err).Msg("Failed to parse margin response")
 		return nil, err
+	}
+	if result.Status != "success" {
+		return nil, fmt.Errorf("margin calculation failed with status: %s", result.Status)
 	}
 
 	return &result, nil

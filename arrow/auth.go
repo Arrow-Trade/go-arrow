@@ -58,9 +58,10 @@ func (c *Client) Authenticate(requestToken string) (string, error) {
 
 	payload := fmt.Sprintf(`{
 		"checkSum": "%s",
+		"checksum": "%s",
 		"token": "%s",
 		"appId": "%s"
-	}`, checksum, requestToken, c.Config.AppID)
+	}`, checksum, checksum, requestToken, c.Config.AppID)
 
 	responseBody, err := c.request("/auth/app/authenticate-token", "POST", []byte(payload))
 	if err != nil {

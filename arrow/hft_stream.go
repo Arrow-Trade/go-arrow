@@ -45,6 +45,7 @@ func (c *Client) ConnectHFTDataStream() (*HFTDataStream, error) {
 	q := url.Values{}
 	q.Set("appID", c.Config.AppID)
 	q.Set("token", c.Config.Token)
+	q.Set("zstd", "1")
 	u := fmt.Sprintf("%s?%s", hftStreamURL, q.Encode())
 	conn, _, err := websocket.DefaultDialer.Dial(u, nil)
 	if err != nil {

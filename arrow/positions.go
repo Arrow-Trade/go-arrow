@@ -20,6 +20,7 @@ type Position struct {
 	Token                    string `json:"token"`                    // Unique token identifier for the trading instrument.
 	Exchange                 string `json:"exchange"`                 // Name of the exchange where the instrument is traded (e.g., NSE, BSE).
 	Symbol                   string `json:"symbol"`                   // Trading symbol of the instrument (e.g., RELIANCE, TCS).
+	Segment                  string `json:"segment"`                  // Segment code (e.g., CM, FO, MCX).
 	Product                  string `json:"product"`                  // Product type (e.g., MIS, CNC, NRML).
 	Qty                      string `json:"qty"`                      // Net quantity of the position (positive for long, negative for short).
 	AvgPrice                 string `json:"avgPrice"`                 // Average price at which the position was acquired.
@@ -36,7 +37,9 @@ type Position struct {
 	CarryForwardSellAmount   string `json:"carryForwardSellAmount"`   // Total amount of carried forward sell transactions.
 	CarryForwardSellAvgPrice string `json:"carryForwardSellAvgPrice"` // Average price of carried forward sell transactions.
 	CarryForwardAvgPrice     string `json:"carryForwardAvgPrice"`     // Average price of all carried forward transactions.
-	Ltp                      string `json:"ltp"`                      // Last traded price of the instrument.
+	Ltp                      string `json:"ltp"`                      // Last traded price of the instrument (paise).
+	Close                    string `json:"close"`                    // Previous close (paise).
+	OptionType               string `json:"optionType"`               // Option type when applicable (CE/PE).
 	RealisedPnL              string `json:"realisedPnL"`              // Realized profit and loss from closed positions.
 	UnrealisedMarkToMarket   string `json:"unrealisedMarkToMarket"`   // Unrealized profit and loss based on current market price.
 	BreakEvenPrice           string `json:"breakEvenPrice"`           // Price at which the position would break even.

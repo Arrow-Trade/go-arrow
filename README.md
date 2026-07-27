@@ -72,6 +72,41 @@ if err != nil {
 fmt.Println(symbols["indices"]["INDEX:NIFTY"])
 ```
 
+## MCX F&O Example
+
+Use `arrow.ExchangeMCXFO` for order, quote, and margin requests. Download instruments via `GET /mcx` (`InstrumentSegmentMCX`). User permission lists and funds segments may still show `"MCX"`.
+
+```go
+order, err := client.PlaceOrder("regular", arrow.OrderRequest{
+	Exchange:        string(arrow.ExchangeMCXFO),
+	Quantity:        "1",
+	DisclosedQty:    "0",
+	Product:         string(arrow.ProductMIS),
+	Symbol:          "GOLDPETAL31JUL26F",
+	TransactionType: string(arrow.TransactionTypeBuy),
+	OrderType:       string(arrow.OrderTypeLimit),
+	Price:           "14300.0",
+	Validity:        string(arrow.ValidityDAY),
+	TriggerPrice:    "0",
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println("Order:", order.Data.OrderNo)
+
+quotes, err := client.GetQuotes([]arrow.QuoteInstrument{
+	{Exchange: string(arrow.ExchangeNSE), Symbol: "ADANIENT-EQ"},
+	{Exchange: string(arrow.ExchangeMCXFO), Symbol: "GOLDPETAL31JUL26F"},
+	{Exchange: string(arrow.ExchangeBSE), Symbol: "RELIANCE"},
+}, arrow.InfoQuoteLTP)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(quotes)
+```
+
+For HFT streaming, use segment constant `arrow.HFTExchMCXFO` (`4`) when the HFT feed accepts MCX tokens for your app. Until then, prefer the standard token stream (`wss://ds.arrow.trade`) — resolve the token from REST quotes or `/mcx`, then `Subscribe(StreamModeLTP, []int32{token})`.
+
 ## WebSocket Example
 
 ```go

@@ -22,6 +22,7 @@ const (
 	HFTExchNSEFO = 1 // NSE F&O
 	HFTExchBSECM = 2 // BSE cash
 	HFTExchBSEFO = 3 // BSE F&O
+	HFTExchMCXFO = 4 // MCX F&O (reserved; token stream / REST quotes recommended until HFT accepts MCX)
 )
 
 const (

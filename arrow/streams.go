@@ -19,8 +19,9 @@ const (
 )
 
 // StreamMode is the subscription mode for the token-based market WebSocket (wss://ds.arrow.trade).
-// Inbound ticks are binary, big-endian int fields, with lengths 13 / 17 / 93 / 241 by mode (aligned with Arrow’s JS/Python clients).
-// REST /info/quote uses a smaller set; see InfoQuoteMode in quote.go.
+// Inbound ticks are binary, big-endian int fields. Base lengths: 13 (ltp) / 17 (ltpc) / 93 (quote) /
+// 241|249 (full). During Closing Auction Session (CAS, after ~15:15 IST) every mode appends a
+// 16-byte trailer → 29 / 33 / 109 / 265. REST /info/quote uses InfoQuoteMode in quote.go.
 type StreamMode string
 
 const (
@@ -28,6 +29,8 @@ const (
 	StreamModeLTPC  StreamMode = "ltpc"
 	StreamModeQuote StreamMode = "quote"
 	StreamModeFull  StreamMode = "full"
+
+	casTrailerLen = 16
 )
 
 type DepthLevel struct {
@@ -60,6 +63,11 @@ type MarketTick struct {
 	UpperLimit        int32        `json:"upperLimit"`
 	Bids              []DepthLevel `json:"bids"`
 	Asks              []DepthLevel `json:"asks"`
+	// CAS fields (appended to every mode after ~15:15 IST: +16 bytes).
+	// ImbalanceQty is signed (negative = sell-side imbalance).
+	ImbalanceQty    int64 `json:"imbalanceQty"`
+	IndicativeClose int32 `json:"indicativeClose"`
+	RefPrice        int32 `json:"refPrice"`
 }
 
 type DataStream struct {
@@ -135,15 +143,40 @@ func ParseMarketTick(data []byte) (MarketTick, error) {
 	switch len(data) {
 	case 13:
 		return parseLTP(data), nil
+	case 29: // LTP + CAS trailer
+		tick := parseLTP(data)
+		applyCAS(&tick, data, 13)
+		return tick, nil
 	case 17:
 		return parseLTPC(data), nil
+	case 33: // LTPC + CAS trailer
+		tick := parseLTPC(data)
+		applyCAS(&tick, data, 17)
+		return tick, nil
 	case 93:
 		return parseQuote(data), nil
-	case 241:
+	case 109: // Quote + CAS trailer
+		tick := parseQuote(data)
+		applyCAS(&tick, data, 93)
+		return tick, nil
+	case 241, 249:
 		return parseFull(data), nil
+	case 265: // Full + CAS trailer
+		tick := parseFull(data)
+		applyCAS(&tick, data, 249)
+		return tick, nil
 	default:
 		return MarketTick{}, fmt.Errorf("unsupported market tick payload size: %d", len(data))
 	}
+}
+
+func applyCAS(tick *MarketTick, data []byte, off int) {
+	if len(data) < off+casTrailerLen {
+		return
+	}
+	tick.ImbalanceQty = beI64(data[off : off+8])
+	tick.IndicativeClose = beI32(data[off+8 : off+12])
+	tick.RefPrice = beI32(data[off+12 : off+16])
 }
 
 func parseLTP(data []byte) MarketTick {
@@ -198,10 +231,15 @@ func parseFull(data []byte) MarketTick {
 	tick.Mode = StreamModeFull
 	tick.LowerLimit = beI32(data[93:97])
 	tick.UpperLimit = beI32(data[97:101])
+	// 249/265-byte packets reserve 8 bytes before depth; 241-byte legacy starts depth at 101.
+	depthOffset := 101
+	if len(data) >= 249 {
+		depthOffset = 109
+	}
 	tick.Bids = make([]DepthLevel, 0, 5)
 	tick.Asks = make([]DepthLevel, 0, 5)
 	for i := 0; i < 10; i++ {
-		offset := 101 + i*14
+		offset := depthOffset + i*14
 		level := DepthLevel{
 			Quantity: beI64(data[offset : offset+8]),
 			Price:    beI32(data[offset+8 : offset+12]),

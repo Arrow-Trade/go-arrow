@@ -12,7 +12,10 @@ const (
 	ExchangeNCD     Exchange = "NCD"
 	ExchangeBFO     Exchange = "BFO"
 	ExchangeBCD     Exchange = "BCD"
+	// ExchangeMCX is used for user-permission checks and instrument segment
+	// downloads (GET /mcx). Prefer ExchangeMCXFO for order, quote, and margin requests.
 	ExchangeMCX     Exchange = "MCX"
+	ExchangeMCXFO   Exchange = "MCXFO" // MCX Futures & Options
 	ExchangeNSESLBM Exchange = "NSESLBM"
 	ExchangeINDEX   Exchange = "INDEX"
 )

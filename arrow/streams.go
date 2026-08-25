@@ -64,7 +64,10 @@ type MarketTick struct {
 	Bids              []DepthLevel `json:"bids"`
 	Asks              []DepthLevel `json:"asks"`
 	// CAS fields (appended to every mode after ~15:15 IST: +16 bytes).
+	// IsCAS is true when the wire packet included the 16-byte CAS tail (even if
+	// the numeric fields are 0 — e.g. non-F&O names during the auction window).
 	// ImbalanceQty is signed (negative = sell-side imbalance).
+	IsCAS           bool  `json:"isCas"`
 	ImbalanceQty    int64 `json:"imbalanceQty"`
 	IndicativeClose int32 `json:"indicativeClose"`
 	RefPrice        int32 `json:"refPrice"`
@@ -135,7 +138,9 @@ func (s *DataStream) ReadTicks(ctx context.Context, onTick func(MarketTick), onE
 			}
 			continue
 		}
-		onTick(tick)
+		if onTick != nil {
+			onTick(tick)
+		}
 	}
 }
 
@@ -174,6 +179,7 @@ func applyCAS(tick *MarketTick, data []byte, off int) {
 	if len(data) < off+casTrailerLen {
 		return
 	}
+	tick.IsCAS = true
 	tick.ImbalanceQty = beI64(data[off : off+8])
 	tick.IndicativeClose = beI32(data[off+8 : off+12])
 	tick.RefPrice = beI32(data[off+12 : off+16])
@@ -300,7 +306,9 @@ func (s *OrderStream) ReadUpdates(ctx context.Context, onUpdate func(map[string]
 			// Non-JSON text (e.g. keepalive); skip without spamming onError.
 			continue
 		}
-		onUpdate(update)
+		if onUpdate != nil {
+			onUpdate(update)
+		}
 	}
 }
 

@@ -59,7 +59,7 @@ func TestParseMarketTickFull249(t *testing.T) {
 	if len(tick.Bids) != 5 || tick.Bids[0].Price != 97750 {
 		t.Fatalf("bids=%v", tick.Bids)
 	}
-	if tick.ImbalanceQty != 0 || tick.IndicativeClose != 0 || tick.RefPrice != 0 {
+	if tick.ImbalanceQty != 0 || tick.IndicativeClose != 0 || tick.RefPrice != 0 || tick.IsCAS {
 		t.Fatalf("unexpected CAS fields: %+v", tick)
 	}
 }
@@ -75,6 +75,9 @@ func TestParseMarketTickFull265CAS(t *testing.T) {
 	}
 	if tick.Mode != StreamModeFull {
 		t.Fatalf("mode=%q, want full", tick.Mode)
+	}
+	if !tick.IsCAS {
+		t.Fatal("IsCAS=false, want true")
 	}
 	if tick.ImbalanceQty != -12345 {
 		t.Fatalf("ImbalanceQty=%d, want -12345", tick.ImbalanceQty)
@@ -119,6 +122,9 @@ func TestParseMarketTickLTPCAS(t *testing.T) {
 	if tick.Close != 0 {
 		t.Fatalf("close=%d, want 0 (CAS must not be read as close)", tick.Close)
 	}
+	if !tick.IsCAS {
+		t.Fatal("IsCAS=false, want true")
+	}
 	if tick.ImbalanceQty != -12345 || tick.IndicativeClose != 97800 || tick.RefPrice != 97750 {
 		t.Fatalf("CAS fields: %+v", tick)
 	}
@@ -136,6 +142,9 @@ func TestParseMarketTickLTPCAS33(t *testing.T) {
 	}
 	if tick.Mode != StreamModeLTPC || tick.Close != 97000 {
 		t.Fatalf("tick=%+v", tick)
+	}
+	if !tick.IsCAS {
+		t.Fatal("IsCAS=false, want true")
 	}
 	if tick.ImbalanceQty != -12345 {
 		t.Fatalf("ImbalanceQty=%d", tick.ImbalanceQty)
@@ -158,6 +167,9 @@ func TestParseMarketTickQuoteCAS109(t *testing.T) {
 	}
 	if tick.Mode != StreamModeQuote || tick.Close != 97000 {
 		t.Fatalf("tick=%+v", tick)
+	}
+	if !tick.IsCAS {
+		t.Fatal("IsCAS=false, want true")
 	}
 	if tick.ImbalanceQty != -12345 || tick.IndicativeClose != 97800 || tick.RefPrice != 97750 {
 		t.Fatalf("CAS fields: %+v", tick)

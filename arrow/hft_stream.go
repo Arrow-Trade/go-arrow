@@ -28,9 +28,11 @@ const (
 const (
 	hftPktLTP      = 1
 	hftPktFull     = 2
+	hftPktCAS      = 7
 	hftPktResponse = 99
 
 	hftSizeLTP      = 40
+	hftSizeCAS      = 168
 	hftSizeFull     = 196
 	hftSizeResponse = 540
 )
@@ -82,8 +84,8 @@ func (s *HFTDataStream) decodeHFTPayload(payload []byte) ([]byte, error) {
 }
 
 // hftPacketMeta inspects the next frame in payload. Response frames use a 4-byte
-// uint32 size (540) with pkt_type at offset 4; LTP/full ticks use int16 size with
-// pkt_type at offset 2.
+// uint32 size (540) with pkt_type at offset 4; LTP/CAS/full ticks use int16 size
+// with pkt_type at offset 2.
 func hftPacketMeta(payload []byte) (size int, pktType uint8, ok bool) {
 	if len(payload) >= hftSizeResponse &&
 		binary.LittleEndian.Uint32(payload[0:4]) == uint32(hftSizeResponse) &&
@@ -96,6 +98,12 @@ func hftPacketMeta(payload []byte) (size int, pktType uint8, ok bool) {
 			return hftSizeLTP, hftPktLTP, true
 		}
 	}
+	if len(payload) >= hftSizeCAS {
+		size = int(int16(binary.LittleEndian.Uint16(payload[0:2])))
+		if size == hftSizeCAS && payload[2] == hftPktCAS {
+			return hftSizeCAS, hftPktCAS, true
+		}
+	}
 	if len(payload) >= hftSizeFull {
 		size = int(int16(binary.LittleEndian.Uint16(payload[0:2])))
 		if size == hftSizeFull && payload[2] == hftPktFull {
@@ -105,7 +113,7 @@ func hftPacketMeta(payload []byte) (size int, pktType uint8, ok bool) {
 	return 0, 0, false
 }
 
-func (s *HFTDataStream) dispatchHFTPayload(payload []byte, onLTP func(HFTLTPTick), onFull func(HFTFullTick), onResponse func(HFTResponsePacket), onError func(error)) {
+func (s *HFTDataStream) dispatchHFTPayload(payload []byte, onLTP func(HFTLTPTick), onFull func(HFTFullTick), onCAS func(HFTCASTick), onResponse func(HFTResponsePacket), onError func(error)) {
 	for len(payload) > 0 {
 		n, pkt, ok := hftPacketMeta(payload)
 		if !ok {
@@ -149,6 +157,17 @@ func (s *HFTDataStream) dispatchHFTPayload(payload []byte, onLTP func(HFTLTPTick
 				}
 				onFull(t)
 			}
+		case hftPktCAS:
+			if onCAS != nil {
+				t, perr := parseHFTCAS(frame)
+				if perr != nil {
+					if onError != nil {
+						onError(perr)
+					}
+					continue
+				}
+				onCAS(t)
+			}
 		}
 	}
 }
@@ -159,12 +178,27 @@ func normalizeHFTMode(mode string) (string, error) {
 		return "ltpc", nil
 	case "f", "full":
 		return "full", nil
+	case "cas":
+		return "cas", nil
 	default:
-		return "", fmt.Errorf("hft mode must be ltpc, l, full, or f, got %q", mode)
+		return "", fmt.Errorf("hft mode must be ltpc, l, full, f, or cas, got %q", mode)
 	}
 }
 
-// SubscribeHFTSymbols subscribes by symbol strings (e.g. NSE.SBIN-EQ). latencyMs is tick spacing (50–60000).
+func hftSubscribeMessage(mode string, latencyMs int) map[string]any {
+	msg := map[string]any{
+		"code": "sub",
+		"mode": mode,
+	}
+	// CAS subscriptions do not use the latency field.
+	if mode != "cas" {
+		msg["latency"] = latencyMs
+	}
+	return msg
+}
+
+// SubscribeHFTSymbols subscribes by symbol strings (e.g. NSE.SBIN-EQ).
+// latencyMs is tick spacing (50–60000) for ltpc/full; it is omitted for cas.
 func (s *HFTDataStream) SubscribeHFTSymbols(mode string, symbols []string, latencyMs int) error {
 	m, err := normalizeHFTMode(mode)
 	if err != nil {
@@ -173,12 +207,8 @@ func (s *HFTDataStream) SubscribeHFTSymbols(mode string, symbols []string, laten
 	if len(symbols) == 0 {
 		return errors.New("hft subscribe: empty symbols")
 	}
-	msg := map[string]any{
-		"code":    "sub",
-		"mode":    m,
-		"latency": latencyMs,
-		"symbols": symbols,
-	}
+	msg := hftSubscribeMessage(m, latencyMs)
+	msg["symbols"] = symbols
 	return s.writeJSON(msg)
 }
 
@@ -194,13 +224,9 @@ func (s *HFTDataStream) SubscribeHFTTokens(mode string, exchSeg int, ids []int32
 	// JSON numbers are float64 in generic decode; server accepts int array.
 	arr := make([]int32, len(ids))
 	copy(arr, ids)
-	msg := map[string]any{
-		"code":    "sub",
-		"mode":    m,
-		"latency": latencyMs,
-		"symIds": []map[string]any{
-			{"exch_seg": exchSeg, "ids": arr},
-		},
+	msg := hftSubscribeMessage(m, latencyMs)
+	msg["symIds"] = []map[string]any{
+		{"exch_seg": exchSeg, "ids": arr},
 	}
 	return s.writeJSON(msg)
 }
@@ -223,12 +249,8 @@ func (s *HFTDataStream) SubscribeHFTBySegment(mode string, segments map[int][]in
 	if len(symIDs) == 0 {
 		return errors.New("hft subscribe: no ids in segments")
 	}
-	msg := map[string]any{
-		"code":    "sub",
-		"mode":    m,
-		"latency": latencyMs,
-		"symIds":  symIDs,
-	}
+	msg := hftSubscribeMessage(m, latencyMs)
+	msg["symIds"] = symIDs
 	return s.writeJSON(msg)
 }
 
@@ -272,7 +294,7 @@ func (s *HFTDataStream) writeJSON(v any) error {
 
 // ReadHFT dispatches binary HFT packets until ctx is done or the socket errors.
 // Text frames (e.g. keepalives) are ignored. Callbacks may be nil.
-func (s *HFTDataStream) ReadHFT(ctx context.Context, onLTP func(HFTLTPTick), onFull func(HFTFullTick), onResponse func(HFTResponsePacket), onError func(error)) {
+func (s *HFTDataStream) ReadHFT(ctx context.Context, onLTP func(HFTLTPTick), onFull func(HFTFullTick), onCAS func(HFTCASTick), onResponse func(HFTResponsePacket), onError func(error)) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -296,7 +318,7 @@ func (s *HFTDataStream) ReadHFT(ctx context.Context, onLTP func(HFTLTPTick), onF
 			}
 			continue
 		}
-		s.dispatchHFTPayload(payload, onLTP, onFull, onResponse, onError)
+		s.dispatchHFTPayload(payload, onLTP, onFull, onCAS, onResponse, onError)
 	}
 }
 
@@ -398,6 +420,63 @@ func parseHFTFull(data []byte) (HFTFullTick, error) {
 	return t, nil
 }
 
+// HFTCASTick is one Closing Auction Session packet (pkt_type 7, 168 bytes).
+// Prices (BidPx, AskPx, IndicativePx, ClosingRefPx, ClosePx) are in paise as uint64.
+type HFTCASTick struct {
+	Size             int16
+	PktType          uint8
+	ExchSeg          uint8
+	Token            int32
+	BidPx            [4]uint64
+	BidSize          [4]uint32
+	AskPx            [4]uint64
+	AskSize          [4]uint32
+	TS               uint64
+	ImbalanceQty     int64
+	ImbalanceMktQty  int64
+	IndicativePx     uint64
+	ClosingRefPx     uint64
+	ClosePx          uint64
+	IndicativeQty    uint32
+	MktBidQty        uint32
+	MktAskQty        uint32
+	Phase            uint8
+	ImbalanceSide    uint8
+	ImbalanceMktSide uint8
+	OnlyLimitOrders  bool
+}
+
+func parseHFTCAS(data []byte) (HFTCASTick, error) {
+	if len(data) < hftSizeCAS {
+		return HFTCASTick{}, fmt.Errorf("hft cas: need %d bytes", hftSizeCAS)
+	}
+	var t HFTCASTick
+	t.Size = int16(binary.LittleEndian.Uint16(data[0:2]))
+	t.PktType = data[2]
+	t.ExchSeg = data[3]
+	t.Token = int32(binary.LittleEndian.Uint32(data[4:8]))
+	for i := range 4 {
+		t.BidPx[i] = binary.LittleEndian.Uint64(data[8+i*8 : 16+i*8])
+		t.BidSize[i] = binary.LittleEndian.Uint32(data[40+i*4 : 44+i*4])
+		t.AskPx[i] = binary.LittleEndian.Uint64(data[56+i*8 : 64+i*8])
+		t.AskSize[i] = binary.LittleEndian.Uint32(data[88+i*4 : 92+i*4])
+	}
+	t.TS = binary.LittleEndian.Uint64(data[104:112])
+	t.ImbalanceQty = int64(binary.LittleEndian.Uint64(data[112:120]))
+	t.ImbalanceMktQty = int64(binary.LittleEndian.Uint64(data[120:128]))
+	t.IndicativePx = binary.LittleEndian.Uint64(data[128:136])
+	t.ClosingRefPx = binary.LittleEndian.Uint64(data[136:144])
+	t.ClosePx = binary.LittleEndian.Uint64(data[144:152])
+	t.IndicativeQty = binary.LittleEndian.Uint32(data[152:156])
+	t.MktBidQty = binary.LittleEndian.Uint32(data[156:160])
+	t.MktAskQty = binary.LittleEndian.Uint32(data[160:164])
+	t.Phase = data[164]
+	t.ImbalanceSide = data[165]
+	t.ImbalanceMktSide = data[166]
+	t.OnlyLimitOrders = data[167] == 1
+	return t, nil
+}
+
 func decodeI32Slice5(b []byte) []int32 {
 	out := make([]int32, 5)
 	for i := range 5 {
@@ -419,13 +498,13 @@ func decodeU16Slice5(b []byte) []uint16 {
 // E_INVALID_JSON, E_MISSING_FIELD, E_INVALID_PARAM, E_PARSE_ERROR (see Arrow WebSocket HFT documentation).
 // These strings are unrelated to REST historical errors (e.g. BadRequestError / invalid token on GET /candle/...).
 type HFTResponsePacket struct {
-	FrameSize      int16 // LE int16 at wire bytes 0–1 (expected 540 for a full response frame)
-	PktType        uint8 // wire byte 2 (99)
-	ExchSeg        uint8 // wire byte 3
+	FrameSize      int16 // first 2 bytes of the LE uint32 size at 0–3 (540)
+	PktType        uint8 // wire byte 4 (99)
+	ExchSeg        uint8 // wire byte 5
 	ErrorCode      string
 	ErrorMsg       string
 	RequestType    uint8 // 0=sub, 1=unsub (wire byte 534)
-	Mode           uint8 // 0=ltpc, 1=full (wire byte 535)
+	Mode           uint8 // 0=ltpc, 1=full, 3=cas (wire byte 535)
 	SuccessCount   uint16
 	ErrorCount     uint16
 	RequestTypeStr string
@@ -433,8 +512,8 @@ type HFTResponsePacket struct {
 }
 
 func parseHFTResponse(data []byte) HFTResponsePacket {
-	// String and tail field offsets match pyarrow_client HFTDataStream._parse_response (data[6:22], etc.).
-	// Packet type for routing is wire byte 2 (see ReadHFT); bytes 4–5 are unused on the wire we model here.
+	// Response frames use a 4-byte size (540) with pkt_type at offset 4 (see hftPacketMeta).
+	// String and tail field offsets match pyarrow_client HFTDataStream._parse_response.
 	r := HFTResponsePacket{
 		FrameSize:    int16(binary.LittleEndian.Uint16(data[0:2])),
 		PktType:      data[4],
@@ -459,6 +538,8 @@ func parseHFTResponse(data []byte) HFTResponsePacket {
 		r.ModeStr = "ltpc"
 	case 1:
 		r.ModeStr = "full"
+	case 3:
+		r.ModeStr = "cas"
 	default:
 		r.ModeStr = "unknown"
 	}

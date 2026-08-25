@@ -41,10 +41,15 @@ func (c *Client) GetBasketMargin(req BasketMarginRequest) (map[string]any, error
 	return result.Data, nil
 }
 
-// GetGreeks posts an array of instrument tokens to /info/greeks.
-// The server may return 400 when Greeks are unavailable for the given tokens.
-func (c *Client) GetGreeks(tokens []int) (json.RawMessage, error) {
-	payload, err := json.Marshal(tokens)
+// GreeksInstrument is one element of POST /info/greeks (exchange + trading symbol).
+type GreeksInstrument struct {
+	Exchange string `json:"exchange"`
+	Symbol   string `json:"symbol"`
+}
+
+// GetGreeks posts [{exchange, symbol}, ...] to /info/greeks.
+func (c *Client) GetGreeks(instruments []GreeksInstrument) (json.RawMessage, error) {
+	payload, err := json.Marshal(instruments)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +119,7 @@ func (c *Client) GetAllOptionChainSymbols() (OptionChainSymbolsByCategory, error
 
 // HolidaysData is the object under "data" for GET /info/holidays.
 type HolidaysData struct {
-	Holidays           map[string]string    `json:"holidays"`
+	Holidays           map[string]string          `json:"holidays"`
 	SpecialTradingDays map[string]json.RawMessage `json:"specialTradingDays"`
 }
 

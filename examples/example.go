@@ -49,7 +49,7 @@ type apiResult struct {
 }
 
 func main() {
-	godotenv.Load()
+	_ = godotenv.Load()
 
 	noStreams := flag.Bool("no-streams", false, "skip WebSocket tests")
 	streamSec := flag.Int("stream-sec", 0, "optional seconds cap on streams")
@@ -175,6 +175,7 @@ func main() {
 	if exs, ok := ocSymbols["indices"]["INDEX:"+testIndex]; ok && len(exs) > 0 {
 		expiry = exs[0]
 	}
+	var optionChain json.RawMessage
 	runAPI("GetOptionChain", false, &results, func() (any, error) {
 		raw, err := client.GetOptionChain(arrow.OptionChainRequest{
 			Underlying: testIndex,
@@ -185,6 +186,7 @@ func main() {
 		if err != nil {
 			return nil, err
 		}
+		optionChain = raw
 		return json.RawMessage(raw), nil
 	})
 
@@ -222,11 +224,11 @@ func main() {
 	})
 
 	runAPI("GetGreeks", true, &results, func() (any, error) {
-		tok, _ := strconv.Atoi(eqToken)
-		if tok == 0 {
-			tok = 3045
+		instruments := greeksFromOptionChain(optionChain, 2)
+		if len(instruments) == 0 {
+			return nil, fmt.Errorf("no option-chain symbols for greeks")
 		}
-		raw, err := client.GetGreeks([]int{tok})
+		raw, err := client.GetGreeks(instruments)
 		if err != nil {
 			return nil, err
 		}
@@ -520,6 +522,9 @@ func runStreams(client *arrow.Client, streamSec int) {
 				func(t arrow.HFTFullTick) {
 					streamLog.Printf("HFT full: token=%d ltp=%d", t.Token, t.LTP)
 				},
+				func(t arrow.HFTCASTick) {
+					streamLog.Printf("HFT CAS: token=%d iep=%d imb=%d phase=%d", t.Token, t.IndicativePx, t.ImbalanceQty, t.Phase)
+				},
 				func(r arrow.HFTResponsePacket) {
 					streamLog.Printf("HFT response: code=%q ok=%d", r.ErrorCode, r.SuccessCount)
 				},
@@ -541,6 +546,46 @@ func instrumentTokenFromEnv() int32 {
 		}
 	}
 	return 3045
+}
+
+func greeksFromOptionChain(raw json.RawMessage, limit int) []arrow.GreeksInstrument {
+	if len(raw) == 0 || limit <= 0 {
+		return nil
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil
+	}
+	var out []arrow.GreeksInstrument
+	seen := map[string]bool{}
+	for _, row := range rows {
+		sym := stringField(row, "symbol", "tradingSymbol")
+		if sym == "" || seen[sym] {
+			continue
+		}
+		ex := stringField(row, "exchange")
+		if ex == "" {
+			ex = string(arrow.ExchangeNFO)
+		}
+		seen[sym] = true
+		out = append(out, arrow.GreeksInstrument{Exchange: ex, Symbol: sym})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func stringField(row map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if v, ok := row[key]; ok {
+			s := strings.TrimSpace(fmt.Sprint(v))
+			if s != "" && s != "<nil>" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 func parseHFTSymbols(raw string, defaults []string) []string {

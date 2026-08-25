@@ -12,7 +12,7 @@ import (
 type Limits struct {
 	Data struct {
 		Allocations []map[string]any `json:"allocations"`
-		Margin      map[string]any     `json:"margin"`
+		Margin      map[string]any   `json:"margin"`
 	} `json:"data"`
 	Status string `json:"status"`
 }

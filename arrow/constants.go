@@ -6,12 +6,12 @@ package arrow
 type Exchange string
 
 const (
-	ExchangeNSE     Exchange = "NSE"
-	ExchangeBSE     Exchange = "BSE"
-	ExchangeNFO     Exchange = "NFO"
-	ExchangeNCD     Exchange = "NCD"
-	ExchangeBFO     Exchange = "BFO"
-	ExchangeBCD     Exchange = "BCD"
+	ExchangeNSE Exchange = "NSE"
+	ExchangeBSE Exchange = "BSE"
+	ExchangeNFO Exchange = "NFO"
+	ExchangeNCD Exchange = "NCD"
+	ExchangeBFO Exchange = "BFO"
+	ExchangeBCD Exchange = "BCD"
 	// ExchangeMCX is used for user-permission checks and instrument segment
 	// downloads (GET /mcx). Prefer ExchangeMCXFO for order, quote, and margin requests.
 	ExchangeMCX     Exchange = "MCX"
@@ -41,12 +41,12 @@ const (
 type OrderType string
 
 const (
-	OrderTypeLimit   OrderType = "LMT"    // Limit order
-	OrderTypeMarket  OrderType = "MKT"    // Market order
-	OrderTypeSL      OrderType = "SL"     // Stop Loss (legacy)
-	OrderTypeSLM     OrderType = "SL-M"   // Stop Loss Market (legacy)
-	OrderTypeSLLMT   OrderType = "SL-LMT" // Stop Loss Limit (REST docs)
-	OrderTypeSLMKT   OrderType = "SL-MKT" // Stop Loss Market (REST docs)
+	OrderTypeLimit  OrderType = "LMT"    // Limit order
+	OrderTypeMarket OrderType = "MKT"    // Market order
+	OrderTypeSL     OrderType = "SL"     // Stop Loss (legacy)
+	OrderTypeSLM    OrderType = "SL-M"   // Stop Loss Market (legacy)
+	OrderTypeSLLMT  OrderType = "SL-LMT" // Stop Loss Limit (REST docs)
+	OrderTypeSLMKT  OrderType = "SL-MKT" // Stop Loss Market (REST docs)
 )
 
 // Validity represents order validity period.

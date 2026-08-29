@@ -4,48 +4,98 @@ package arrow
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/valyala/fasthttp"
 )
 
+// DefaultHTTPTimeout is applied to every REST call when the caller does not set
+// a timeout. fasthttp.Client.Do has no deadline unless ReadTimeout/WriteTimeout
+// are set; without this a stalled connection can block forever.
+const DefaultHTTPTimeout = 10 * time.Second
+
 // Config holds the SDK configuration settings.
 type Config struct {
-	AppID        string // Application ID for API authentication.
-	AppSecret    string // Application secret key for API authentication.
-	Token        string // Authentication token for API requests.
-	BaseURL      string // Base URL of the Arrow API.
-	RefreshToken string // Token used to refresh authentication when expired.
-	Debug        bool   // Enables verbose SDK debug logs when true.
+	AppID        string        // Application ID for API authentication.
+	AppSecret    string        // Application secret key for API authentication.
+	Token        string        // Authentication token for API requests.
+	BaseURL      string        // Base URL of the Arrow API.
+	RefreshToken string        // Token used to refresh authentication when expired.
+	Debug        bool          // Enables verbose SDK debug logs when true.
+	Timeout      time.Duration // Per-request REST timeout. Zero means DefaultHTTPTimeout.
 }
 
 // Client is the main struct for interacting with the Arrow API.
 //
 // It contains the configuration settings and an HTTP client for making API requests.
+// Configure request bounds with SetHTTPTimeout before the first call, or pass a
+// timeout to NewClientWithTimeout. Prefer those APIs over mutating HTTPClient
+// fields directly.
 type Client struct {
 	Config     Config           // Configuration settings for the API client.
 	HTTPClient *fasthttp.Client // HTTP client for executing requests.
 	mu         sync.RWMutex
 }
 
-// NewClient initializes a new SDK client with the provided application credentials.
-//
-// Parameters:
-//   - appID: The application ID used for authentication.
-//   - appSecret: The application secret key used for authentication.
-//
-// Returns:
-//   - A pointer to a newly created Client instance.
+// NewClient initializes a new SDK client with DefaultHTTPTimeout (10s, same as py-arrow) on every REST call.
 func NewClient(appID, appSecret string) *Client {
+	return NewClientWithTimeout(appID, appSecret, DefaultHTTPTimeout)
+}
+
+// NewClientWithTimeout is NewClient with an explicit per-request timeout.
+// A non-positive timeout falls back to DefaultHTTPTimeout.
+func NewClientWithTimeout(appID, appSecret string, timeout time.Duration) *Client {
+	if timeout <= 0 {
+		timeout = DefaultHTTPTimeout
+	}
 	return &Client{
 		Config: Config{
 			AppID:     appID,
 			AppSecret: appSecret,
 			BaseURL:   "https://edge.arrow.trade",
+			Timeout:   timeout,
 		},
-		HTTPClient: &fasthttp.Client{},
+		HTTPClient: newHTTPClient(timeout),
 	}
+}
+
+func newHTTPClient(timeout time.Duration) *fasthttp.Client {
+	return &fasthttp.Client{
+		ReadTimeout:  timeout,
+		WriteTimeout: timeout,
+	}
+}
+
+// SetHTTPTimeout sets the per-request REST deadline used by DoTimeout.
+// Call this before the first request so fasthttp also copies ReadTimeout/
+// WriteTimeout onto the per-host client. A non-positive value is ignored.
+func (c *Client) SetHTTPTimeout(timeout time.Duration) {
+	if timeout <= 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Config.Timeout = timeout
+	if c.HTTPClient != nil {
+		c.HTTPClient.ReadTimeout = timeout
+		c.HTTPClient.WriteTimeout = timeout
+	}
+}
+
+// HTTPTimeout returns the configured per-request REST timeout.
+func (c *Client) HTTPTimeout() time.Duration {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.Config.Timeout > 0 {
+		return c.Config.Timeout
+	}
+	return DefaultHTTPTimeout
+}
+
+func (c *Client) do(req *fasthttp.Request, resp *fasthttp.Response) error {
+	return c.HTTPClient.DoTimeout(req, resp, c.HTTPTimeout())
 }
 
 // request sends an HTTP API request to the Arrow server and retrieves the response.
@@ -81,8 +131,7 @@ func (c *Client) request(endpoint string, method string, payload []byte) ([]byte
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(resp)
 
-	// Execute the request using the fasthttp client.
-	err := c.HTTPClient.Do(req, resp)
+	err := c.do(req, resp)
 	if err != nil {
 		log.Error().Err(err).Msg("API request failed")
 		return nil, err
@@ -123,8 +172,7 @@ func (c *Client) rawRequest(url string, method string, payload []byte) ([]byte, 
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(resp)
 
-	// Execute the request using the fasthttp client.
-	err := c.HTTPClient.Do(req, resp)
+	err := c.do(req, resp)
 	if err != nil {
 		log.Error().Err(err).Msg("API request failed")
 		return nil, err
@@ -146,6 +194,7 @@ func (c *Client) rawRequestAuth(fullURL string, method string, payload []byte) (
 	defer fasthttp.ReleaseRequest(req)
 	req.SetRequestURI(fullURL)
 	req.Header.Set("appId", c.Config.AppID)
+	req.Header.Set("appID", c.Config.AppID)
 	req.Header.Set("token", c.Config.Token)
 	req.Header.SetMethod(method)
 	if len(payload) > 0 {
@@ -156,7 +205,7 @@ func (c *Client) rawRequestAuth(fullURL string, method string, payload []byte) (
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(resp)
 
-	err := c.HTTPClient.Do(req, resp)
+	err := c.do(req, resp)
 	if err != nil {
 		log.Error().Err(err).Msg("API request failed")
 		return nil, err

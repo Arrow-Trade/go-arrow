@@ -47,6 +47,10 @@ func main() {
 	// Optional: enable verbose SDK logs
 	client.SetDebug(true)
 
+	// Optional: bound every REST call (default is 10s, same as py-arrow).
+	// client := arrow.NewClientWithTimeout("YOUR_APP_ID", "YOUR_APP_SECRET", 30*time.Second)
+	// client.SetHTTPTimeout(30 * time.Second)
+
 	if err := client.AutoLogin("USER_ID", "PASSWORD", "TOTP_SECRET"); err != nil {
 		log.Fatal(err)
 	}
@@ -134,6 +138,18 @@ client.SetDebug(true)
 ```
 
 to enable verbose request lifecycle logs.
+
+## HTTP timeouts
+
+REST methods use `fasthttp` `DoTimeout`. `NewClient` sets a **10s** read/write/request timeout (same as the Python SDK) so a stalled connection cannot block forever.
+
+```go
+client := arrow.NewClientWithTimeout(appID, appSecret, 30*time.Second)
+// or, after NewClient and before the first request:
+client.SetHTTPTimeout(30 * time.Second)
+```
+
+Do not rely on assigning `client.HTTPClient.ReadTimeout` yourself; `SetHTTPTimeout` is the supported API.
 
 ## Security Notes
 

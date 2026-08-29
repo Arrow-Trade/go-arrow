@@ -3,6 +3,7 @@ package arrow
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -118,5 +119,41 @@ func TestCancelOrderMCXFO(t *testing.T) {
 
 	if err := client.CancelOrder("regular", "26072701000257"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCancelAllOrdersCancelsStandingOnly(t *testing.T) {
+	var cancelled []string
+	client, server := newTestClient(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/user/orders":
+			_, _ = w.Write([]byte(`{"status":"success","data":[
+				{"id":"open-1","orderStatus":"OPEN"},
+				{"id":"done-1","orderStatus":"COMPLETE"},
+				{"id":"pending-1","orderStatus":"TRIGGER_PENDING"},
+				{"id":"new-1","orderStatus":"PENDING"}
+			]}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/order/regular/open-1":
+			cancelled = append(cancelled, "open-1")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"message":"cancelled"}}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/order/regular/pending-1":
+			cancelled = append(cancelled, "pending-1")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"message":"cancelled"}}`))
+		default:
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	})
+	defer server.Close()
+
+	err := client.CancelAllOrders()
+	if err == nil {
+		t.Fatal("expected error when a PENDING order remains (exchange binary down)")
+	}
+	if !strings.Contains(err.Error(), "PENDING") {
+		t.Fatalf("error = %v, want PENDING", err)
+	}
+	if len(cancelled) != 2 {
+		t.Fatalf("cancelled = %v, want open-1 and pending-1", cancelled)
 	}
 }

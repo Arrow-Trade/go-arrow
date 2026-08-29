@@ -198,7 +198,12 @@ func (c *Client) GetCandleData(exchange Exchange, token, interval, fromTimestamp
 	if oi {
 		q.Set("oi", "1")
 	}
-	endpoint := fmt.Sprintf("%s/candle/%s/%s/%s?%s", base, strings.ToLower(string(exchange)), token, interval, q.Encode())
+	ex := strings.ToLower(string(exchange))
+	// Historical API accepts mcx / nse / bse — not mcxfo.
+	if ex == "mcxfo" {
+		ex = "mcx"
+	}
+	endpoint := fmt.Sprintf("%s/candle/%s/%s/%s?%s", base, ex, token, interval, q.Encode())
 	resp, err := c.rawRequestAuth(endpoint, "GET", nil)
 	if err != nil {
 		return nil, err

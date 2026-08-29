@@ -11,6 +11,7 @@
 //
 //	client := arrow.NewClient(appID, appSecret)
 //	client.SetDebug(true) // optional
+//	client.SetHTTPTimeout(30 * time.Second) // optional; default 10s (same as py-arrow)
 //	err := client.AutoLogin(userID, password, totpSecret)
 //
 // API docs:

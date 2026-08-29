@@ -4,6 +4,7 @@ package arrow
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -270,22 +271,45 @@ func (c *Client) CancelOrder(orderType, orderID string) error {
 	return nil
 }
 
-// CancelAllOrders cancels all open orders (DELETE /user/orders).
+// CancelAllOrders cancels every standing order. There is no DELETE /user/orders
+// route — this matches the Python SDK: read the book, then cancel each open id.
 func (c *Client) CancelAllOrders() error {
-	resp, err := c.request("/user/orders", "DELETE", nil)
+	orders, err := c.GetOrderBook()
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to cancel all orders")
 		return err
 	}
-	var result GenericResponse[map[string]any]
-	if err := json.Unmarshal(resp, &result); err != nil {
-		log.Error().Err(err).Msg("Failed to parse cancel all orders response")
-		return err
+	var first error
+	cancelled := 0
+	var pendingIDs []string
+	for _, o := range orders {
+		status := strings.ToUpper(strings.TrimSpace(o.OrderStatus))
+		switch status {
+		case "PENDING", "PENDINGNEW", "PENDING_NEW":
+			pendingIDs = append(pendingIDs, o.ID)
+			continue
+		case "OPEN", "TRIGGER_PENDING", "PARTIALLY_FILLED":
+		default:
+			continue
+		}
+		if err := c.CancelOrder("regular", o.ID); err != nil {
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		cancelled++
 	}
-	if result.Status != "success" {
-		return fmt.Errorf("cancel all orders failed with status: %s", result.Status)
+	if first != nil {
+		return first
 	}
-	c.debugf("All orders cancelled successfully", nil)
+	if len(pendingIDs) > 0 {
+		return fmt.Errorf("%d order(s) stuck in PENDING (exchange connectivity binary is down): %s",
+			len(pendingIDs), strings.Join(pendingIDs, ", "))
+	}
+	c.debugf("All orders cancelled successfully", func(e *zerolog.Event) {
+		e.Int("cancelled", cancelled)
+	})
 	return nil
 }
 

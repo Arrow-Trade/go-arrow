@@ -158,6 +158,7 @@ Do not rely on assigning `client.HTTPClient.ReadTimeout` yourself; `SetHTTPTimeo
 
 ## API Reference
 
+- Go SDK docs: [docs.arrow.trade/go-sdk/getting-started](https://docs.arrow.trade/go-sdk/getting-started/)
 - Arrow API docs: [docs.arrow.trade](https://docs.arrow.trade/)
 - Go package docs: [pkg.go.dev/github.com/arrow-trade/go-arrow](https://pkg.go.dev/github.com/arrow-trade/go-arrow)
 

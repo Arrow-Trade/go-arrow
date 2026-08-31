@@ -18,13 +18,12 @@ const DefaultHTTPTimeout = 10 * time.Second
 
 // Config holds the SDK configuration settings.
 type Config struct {
-	AppID        string        // Application ID for API authentication.
-	AppSecret    string        // Application secret key for API authentication.
-	Token        string        // Authentication token for API requests.
-	BaseURL      string        // Base URL of the Arrow API.
-	RefreshToken string        // Token used to refresh authentication when expired.
-	Debug        bool          // Enables verbose SDK debug logs when true.
-	Timeout      time.Duration // Per-request REST timeout. Zero means DefaultHTTPTimeout.
+	AppID     string        // Application ID for API authentication.
+	AppSecret string        // Application secret key for API authentication.
+	Token     string        // Authentication token for API requests.
+	BaseURL   string        // Base URL of the Arrow API.
+	Debug     bool          // Enables verbose SDK debug logs when true.
+	Timeout   time.Duration // Per-request REST timeout. Zero means DefaultHTTPTimeout.
 }
 
 // Client is the main struct for interacting with the Arrow API.
@@ -260,14 +259,4 @@ func (c *Client) debugf(msg string, addFields func(*zerolog.Event)) {
 //   - The current authentication token.
 func (c *Client) GetToken() string {
 	return c.Config.Token
-}
-
-// GetRefreshToken gets the refresh token of the user.
-//
-// This function allows to get the refresh token at runtime which can be used to create new Token.
-//
-// Returns:
-//   - refreshToken: The refresh token.
-func (c *Client) GetRefreshToken() string {
-	return c.Config.RefreshToken
 }

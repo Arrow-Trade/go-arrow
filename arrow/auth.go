@@ -19,10 +19,9 @@ import (
 type AuthResponse struct {
 	Status string `json:"status"` // API response status (e.g., "success" or "error").
 	Data   struct {
-		Name         string `json:"name"`         // User's name.
-		Token        string `json:"token"`        // Authentication token.
-		UserID       string `json:"userId"`       // Unique identifier for the user.
-		RefreshToken string `json:"refreshToken"` // Token used for refreshing authentication.
+		Name   string `json:"name"`   // User's name.
+		Token  string `json:"token"`  // Authentication token.
+		UserID string `json:"userId"` // Unique identifier for the user.
 	} `json:"data"`
 }
 
@@ -81,9 +80,6 @@ func (c *Client) Authenticate(requestToken string) (string, error) {
 
 	// Update client token after authentication
 	c.Config.Token = authResponse.Data.Token
-	if authResponse.Data.RefreshToken != "" {
-		c.Config.RefreshToken = authResponse.Data.RefreshToken
-	}
 
 	c.debugf("Authentication successful", func(e *zerolog.Event) {
 		e.Str("userID", authResponse.Data.UserID)
